@@ -1,17 +1,27 @@
 """Chess move analyzer: screenshot -> FEN -> best move via Lc0/Stockfish."""
 
-from .vision import detect_board_fen, BoardDetectionResult
-from .engines import analyze_fen, EngineName, EngineResult, EngineUnavailable
-from .analyzer import analyze_screenshot, AnalyzeRequest, AnalyzeResponse
+from .analyzer import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    ClassifierName,
+    PlayMoveResult,
+    analyze_screenshot,
+    play_move,
+)
+from .engines import EngineName, EngineResult, EngineUnavailable, analyze_fen
+from .vision import BoardDetectionResult, detect_board_fen
 
 __all__ = [
-    "detect_board_fen",
-    "BoardDetectionResult",
+    "analyze_screenshot",
+    "play_move",
+    "AnalyzeRequest",
+    "AnalyzeResponse",
+    "ClassifierName",
+    "PlayMoveResult",
     "analyze_fen",
     "EngineName",
     "EngineResult",
     "EngineUnavailable",
-    "analyze_screenshot",
-    "AnalyzeRequest",
-    "AnalyzeResponse",
+    "detect_board_fen",
+    "BoardDetectionResult",
 ]

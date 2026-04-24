@@ -53,6 +53,7 @@ class BoardDetectionResult:
     board_image: np.ndarray  # warped BGR board (BOARD_SIZE_PX square)
     cell_confidences: list[float] = field(default_factory=list)
     found_board: bool = False
+    template_set_used: str | None = None
 
 
 def detect_board_fen(
@@ -60,8 +61,15 @@ def detect_board_fen(
     *,
     orientation: str = "white",  # "white" = white pieces at bottom of image
     side_to_move: str = "w",
+    template_set: str | None = None,
 ) -> BoardDetectionResult:
-    """Detect chessboard in image_bytes and return an inferred FEN."""
+    """Detect chessboard in image_bytes and return an inferred FEN.
+
+    `template_set` selects a bundled PNG template set under
+    `chess_analyzer/templates/<name>/`. When None, every available set is
+    tried and the one with the highest mean cell confidence wins. When no
+    PNG sets are present we fall back to Unicode-glyph shape templates.
+    """
     if orientation not in {"white", "black"}:
         raise ValueError("orientation must be 'white' or 'black'")
     if side_to_move not in {"w", "b"}:
@@ -70,7 +78,7 @@ def detect_board_fen(
     img = _decode_image(image_bytes)
     warped, found = _find_and_warp_board(img)
 
-    grid, confidences = _classify_cells(warped)
+    grid, confidences, set_used = _classify_cells(warped, template_set=template_set)
     if orientation == "black":
         grid = [row[::-1] for row in grid[::-1]]
 
@@ -80,6 +88,7 @@ def detect_board_fen(
         board_image=warped,
         cell_confidences=confidences,
         found_board=found,
+        template_set_used=set_used,
     )
 
 
@@ -163,21 +172,46 @@ def _order_quad(pts: np.ndarray) -> np.ndarray:
     return np.stack([tl, tr, br, bl]).astype(np.float32)
 
 
-def _classify_cells(board_img: np.ndarray) -> tuple[list[list[str]], list[float]]:
-    """Return an 8x8 grid of piece codes ('.' for empty) + per-cell confidence.
+def _classify_cells(
+    board_img: np.ndarray, *, template_set: str | None = None
+) -> tuple[list[list[str]], list[float], str | None]:
+    """Return an 8x8 grid of piece codes ('.' for empty) + per-cell confidence
+    + the name of the template set used.
 
-    Strategy: for each cell we build a silhouette (Otsu threshold, minority =
-    piece), use its fill ratio for occupancy, match shape against six filled
-    glyph templates to name the piece type, then determine color by comparing
-    the piece mean to the square background mean.
+    Strategy:
+      1. If PNG template sets are available under `chess_analyzer/templates/`,
+         try the named set (or every set when `template_set` is None) and pick
+         the one with the highest mean cell confidence. PNG sets resolve both
+         piece TYPE and COLOR directly.
+      2. Otherwise fall back to Unicode-glyph shape templates (type only),
+         with color decided by comparing piece luminance to square background.
     """
     gray = cv2.cvtColor(board_img, cv2.COLOR_BGR2GRAY)
+
+    png_sets = _png_template_sets()
+    if template_set is not None:
+        png_sets = {template_set: png_sets[template_set]} if template_set in png_sets else {}
+
+    if png_sets:
+        best: tuple[list[list[str]], list[float], str] | None = None
+        for name, templates in png_sets.items():
+            grid, confs = _classify_with_color_templates(gray, templates)
+            mean_conf = sum(confs) / max(len(confs), 1)
+            if best is None or mean_conf > sum(best[1]) / max(len(best[1]), 1):
+                best = (grid, confs, name)
+        assert best is not None
+        return best
+
     shape_templates = _shape_templates()
+    grid, confs = _classify_with_shape_templates(gray, shape_templates)
+    return grid, confs, None
+
+
+def _classify_with_shape_templates(
+    gray: np.ndarray, templates: dict[str, np.ndarray]
+) -> tuple[list[list[str]], list[float]]:
     grid: list[list[str]] = []
     confs: list[float] = []
-
-    # Pieces cover an intentionally wide band because rendered glyphs vary.
-    # The lower bound excludes cells where Otsu fires on rendering noise.
     min_fill = 0.05
     max_fill = 0.80
 
@@ -192,18 +226,63 @@ def _classify_cells(board_img: np.ndarray) -> tuple[list[list[str]], list[float]
                 confs.append(0.0)
                 continue
 
-            piece_type, score = _best_shape_match(silhouette, shape_templates)
+            piece_type, score = _best_shape_match(silhouette, templates)
             if piece_type == ".":
                 row.append(".")
                 confs.append(score)
                 continue
 
             piece_mean = float(cell[silhouette > 0].mean())
-            bg_mean = float(cell[silhouette == 0].mean()) if (silhouette == 0).any() else 128.0
+            bg_mean = (
+                float(cell[silhouette == 0].mean())
+                if (silhouette == 0).any()
+                else 128.0
+            )
             is_white_piece = piece_mean > bg_mean
-
             row.append(piece_type.upper() if is_white_piece else piece_type.lower())
             confs.append(score)
+        grid.append(row)
+    return grid, confs
+
+
+def _classify_with_color_templates(
+    gray: np.ndarray, templates: dict[str, np.ndarray]
+) -> tuple[list[list[str]], list[float]]:
+    """Templates are keyed by full piece code ('K','k',...) — one per color.
+
+    We correlate every cell against every template and use the normalized
+    cross-correlation peak to decide piece type and color together. An
+    additional "empty" threshold prunes clearly-empty squares first.
+    """
+    grid: list[list[str]] = []
+    confs: list[float] = []
+    min_fill = 0.03
+
+    for r in range(8):
+        row: list[str] = []
+        for f in range(8):
+            cell = _extract_cell(gray, r, f)
+            silhouette = _cell_to_silhouette(cell)
+            fill_ratio = float(cv2.countNonZero(silhouette)) / float(silhouette.size)
+            if fill_ratio < min_fill:
+                row.append(".")
+                confs.append(0.0)
+                continue
+
+            best_piece = "."
+            best_score = -1.0
+            for piece, tmpl in templates.items():
+                res = cv2.matchTemplate(cell, tmpl, cv2.TM_CCOEFF_NORMED)
+                score = float(res.max())
+                if score > best_score:
+                    best_score = score
+                    best_piece = piece
+            if best_score < 0.30:
+                row.append(".")
+                confs.append(best_score)
+            else:
+                row.append(best_piece)
+                confs.append(best_score)
         grid.append(row)
     return grid, confs
 
@@ -271,6 +350,76 @@ def _grid_to_fen(grid: list[list[str]], *, side_to_move: str) -> str:
     except ValueError:
         fen = f"8/8/8/8/8/8/8/8 {side_to_move} - - 0 1"
     return fen
+
+
+_TEMPLATE_DIR_NAME = "templates"
+_PIECE_FILENAMES: dict[str, tuple[str, ...]] = {
+    # FEN code -> filenames we'll accept (case-insensitive, without .png).
+    "K": ("wk", "whiteking", "king_w"),
+    "Q": ("wq", "whitequeen", "queen_w"),
+    "R": ("wr", "whiterook", "rook_w"),
+    "B": ("wb", "whitebishop", "bishop_w"),
+    "N": ("wn", "whiteknight", "knight_w"),
+    "P": ("wp", "whitepawn", "pawn_w"),
+    "k": ("bk", "blackking", "king_b"),
+    "q": ("bq", "blackqueen", "queen_b"),
+    "r": ("br", "blackrook", "rook_b"),
+    "b": ("bb", "blackbishop", "bishop_b"),
+    "n": ("bn", "blackknight", "knight_b"),
+    "p": ("bp", "blackpawn", "pawn_b"),
+}
+
+
+@lru_cache(maxsize=1)
+def _png_template_sets() -> dict[str, dict[str, np.ndarray]]:
+    """Scan templates/<set>/*.png and return loaded, resized, grayscale sets.
+
+    Each set must contain all 12 piece files (any accepted filename per piece,
+    any reasonable image size — we resize to CELL_SIZE_PX). Sets missing pieces
+    are skipped with a note; we never partially load a set.
+    """
+    import os
+
+    base = os.path.join(os.path.dirname(__file__), _TEMPLATE_DIR_NAME)
+    if not os.path.isdir(base):
+        return {}
+
+    sets: dict[str, dict[str, np.ndarray]] = {}
+    for set_name in sorted(os.listdir(base)):
+        set_dir = os.path.join(base, set_name)
+        if not os.path.isdir(set_dir):
+            continue
+        entries = {f.lower(): f for f in os.listdir(set_dir) if f.lower().endswith(".png")}
+        loaded: dict[str, np.ndarray] = {}
+        ok = True
+        for piece, candidates in _PIECE_FILENAMES.items():
+            match = None
+            for cand in candidates:
+                key = f"{cand}.png"
+                if key in entries:
+                    match = entries[key]
+                    break
+            if match is None:
+                ok = False
+                break
+            img = cv2.imread(os.path.join(set_dir, match), cv2.IMREAD_UNCHANGED)
+            if img is None:
+                ok = False
+                break
+            # Composite any alpha channel onto a mid-gray backdrop so matching
+            # doesn't lock onto transparent borders.
+            if img.ndim == 3 and img.shape[2] == 4:
+                alpha = img[:, :, 3:4].astype(np.float32) / 255.0
+                bgr = img[:, :, :3].astype(np.float32)
+                backdrop = np.full_like(bgr, 128.0)
+                img = (alpha * bgr + (1 - alpha) * backdrop).astype(np.uint8)
+            if img.ndim == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.resize(img, (CELL_SIZE_PX, CELL_SIZE_PX), interpolation=cv2.INTER_AREA)
+            loaded[piece] = img
+        if ok:
+            sets[set_name] = loaded
+    return sets
 
 
 @lru_cache(maxsize=1)
