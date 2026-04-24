@@ -15,13 +15,31 @@ from __future__ import annotations
 
 import os
 
-import chess
-import chess.svg
 import streamlit as st
 
-from chess_analyzer.analyzer import AnalyzeRequest, analyze_screenshot, play_move
-from chess_analyzer.engines import EngineUnavailable, available_engines
-from chess_analyzer.vision import _png_template_sets, board_image_to_pil, detect_board_fen
+# On Streamlit Community Cloud users add ANTHROPIC_API_KEY via the dashboard's
+# Secrets UI. We hoist it into the environment before the analyzer imports run
+# so the VLM module — which reads from os.environ — picks it up too. Wrapped
+# defensively because st.secrets raises if no secrets.toml is configured at
+# all (e.g. during local development).
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    try:
+        secret_value = st.secrets.get("ANTHROPIC_API_KEY")  # type: ignore[attr-defined]
+    except Exception:
+        secret_value = None
+    if secret_value:
+        os.environ["ANTHROPIC_API_KEY"] = secret_value
+
+import chess  # noqa: E402
+import chess.svg  # noqa: E402
+
+from chess_analyzer.analyzer import AnalyzeRequest, analyze_screenshot, play_move  # noqa: E402
+from chess_analyzer.engines import EngineUnavailable, available_engines  # noqa: E402
+from chess_analyzer.vision import (  # noqa: E402
+    _png_template_sets,
+    board_image_to_pil,
+    detect_board_fen,
+)
 
 st.set_page_config(page_title="Chess Move Analyzer", page_icon="♟️", layout="wide")
 

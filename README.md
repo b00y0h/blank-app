@@ -49,14 +49,45 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ## Run the web app
 
+### Locally
+
 ```bash
 streamlit run streamlit_app.py
 ```
+
+### Streamlit Community Cloud (deploy from your phone)
+
+The repo ships ready to deploy: `streamlit_app.py` at the root,
+`requirements.txt` for Python deps, and `packages.txt` so Stockfish gets
+`apt-get`-installed automatically.
+
+1. Open <https://share.streamlit.io> in your phone browser and sign in with
+   GitHub.
+2. Tap **Create app** → **Deploy a public app from GitHub**.
+3. Repository: `b00y0h/blank-app`. Branch:
+   `claude/chess-move-analyzer-UgpGU` (or `main` once you merge). Main file
+   path: `streamlit_app.py`.
+4. (Optional, for the VLM classifier) Tap **Advanced settings** →
+   **Secrets** and paste:
+   ```toml
+   ANTHROPIC_API_KEY = "sk-ant-..."
+   ```
+5. **Deploy**. First boot installs Stockfish + Python deps (~1–2 minutes).
+
+When the app comes up:
 
 1. Upload a screenshot (or paste a FEN).
 2. Confirm the detected FEN and hit **Start game from this FEN**.
 3. **Find best move** → **Play best move** alternates sides turn by turn.
 4. **Undo** / **Reset** to step back or start a new game.
+
+Notes for the cloud deploy:
+
+- Stockfish runs out of the box. Lc0 isn't in `apt`, so the Lc0 option will
+  show **(not installed)**; pick Stockfish.
+- Without `ANTHROPIC_API_KEY`, the **Auto** classifier silently falls back
+  to the bundled-template / Unicode-glyph path. The FEN field is editable
+  either way, so you can correct any misreads before starting the game.
 
 ## Run the API
 
