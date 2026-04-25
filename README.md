@@ -25,25 +25,20 @@ project picks its battles:
 Whichever classifier wins, both UIs surface the detected FEN as an editable
 field before the game starts.
 
-### Install the offline neural classifier
+### The offline neural classifier is built in
 
-The neural path is an optional extra because it pulls in TensorFlow
-(~500 MB on disk):
+The neural path is part of the default install (`pip install -r
+requirements.txt`). On Streamlit Community Cloud the build picks it up
+automatically and the **neural** classifier becomes the default.
 
-```bash
-pip install -r requirements-neural.txt
-```
+We use `tensorflow-cpu==2.15.*` rather than full `tensorflow` so the install
+fits comfortably inside Streamlit Cloud's resource budget. There's no GPU on
+the cloud runtime anyway, so inference quality is identical and the cold
+boot is faster.
 
-That installs `board_to_fen` plus the matching `tensorflow==2.15.*` and
-`keras==2.15.*` versions (board_to_fen's bundled SavedModel needs Keras 2;
-later versions can't load it). After install, the **neural** classifier
-becomes available and is auto-selected first; nothing else changes.
-
-For Streamlit Community Cloud the neural extras can exceed the free-tier
-limits, so the cloud deploy stays on the smaller default dependency set
-(`requirements.txt`). For a personal device or your own VM, the neural
-extras give you offline, no-network, CNN-grade accuracy on chess.com,
-Lichess, and most 2D boards.
+If you want a leaner install for a CLI-only workflow, you can `pip install
+chess_analyzer` without TF and the analyzer will fall through to VLM /
+templates.
 
 ## Setup
 
@@ -56,17 +51,12 @@ Engine binaries (install whichever you'll use):
 - **Stockfish** — `brew install stockfish` (macOS) · `apt-get install stockfish` (Debian/Ubuntu) · or set `STOCKFISH_PATH=/abs/path/to/stockfish`.
 - **Leela Chess Zero** — See <https://lczero.org/play/download/>. Lc0 also needs a weights file; point to it via Lc0's own config or `LC0_PATH`.
 
-Optional add-ons:
+Optional VLM classifier (handles physical-board photos / exotic themes
+over the network):
 
-- **Offline neural classifier** (recommended for accuracy on real screenshots):
-  ```bash
-  pip install -r requirements-neural.txt
-  ```
-  Adds `board_to_fen` + matched TensorFlow / Keras (~500 MB).
-- **Claude VLM classifier** (handles photos / exotic boards over the network):
-  ```bash
-  export ANTHROPIC_API_KEY=sk-ant-...
-  ```
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
 
 ## Run the web app
 

@@ -1,17 +1,5 @@
-# Optional offline neural classifier (board_to_fen + TensorFlow). Heavy
-# install (~500 MB on disk for TF). Adds the "neural" classifier mode for
-# fully-offline, multi-site piece detection.
-#
-# Install over the base requirements:
-#     pip install -r requirements.txt
-#     pip install -r requirements-neural.txt
-#
-# board_to_fen pins to a Keras 2 SavedModel; matching TF and Keras versions
-# are required. numpy and opencv-python-headless are constrained to versions
-# compatible with TF 2.15.
-
-board_to_fen>=0.1.1
-tensorflow==2.15.*
-keras==2.15.*
-numpy<2.0
-opencv-python-headless<4.12
+# The neural classifier is now part of the base install — see
+# requirements.txt. This file is kept for backwards compatibility so
+# existing `pip install -r requirements-neural.txt` invocations still work,
+# but it just re-exports the base requirements.
+-r requirements.txt
