@@ -156,6 +156,17 @@ if st.session_state.current_fen is None:
             placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         )
 
+    # Seed the FEN field once. Subsequent updates (new upload / pasted FEN)
+    # write directly into st.session_state["fen_input_setup"] so the widget
+    # picks them up on the next rerun. Streamlit ignores `value=` for keyed
+    # widgets after the first render, which was silently pinning a stale
+    # default in place.
+    DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    st.session_state.setdefault("fen_input_setup", DEFAULT_FEN)
+    st.session_state.setdefault("last_upload_id", None)
+
+    detection_warning: str | None = None
+
     if uploaded is not None and not manual_fen.strip():
         try:
             det = detect_board_fen(
@@ -167,7 +178,34 @@ if st.session_state.current_fen is None:
         except Exception as exc:  # noqa: BLE001 - surfaced to user
             st.error(f"Could not process image: {exc}")
         else:
+            new_upload = st.session_state.last_upload_id != uploaded.file_id
+            if new_upload:
+                st.session_state.fen_input_setup = det.fen
+                st.session_state.last_upload_id = uploaded.file_id
             st.session_state.pending_detected_fen = det.fen
+
+            try:
+                piece_count = sum(
+                    1 for c in det.fen.split(" ")[0] if c.isalpha()
+                )
+            except Exception:  # noqa: BLE001
+                piece_count = 0
+            classifier_used = (
+                f"templates:{det.template_set_used}"
+                if det.template_set_used
+                else "unicode-glyph templates"
+            )
+            if piece_count < 8:
+                detection_warning = (
+                    f"Only {piece_count} pieces recognised by **{classifier_used}**. "
+                    "This usually means the piece set in your screenshot doesn't "
+                    "match the bundled templates. Either edit the FEN below by "
+                    "hand, or enable the **Claude VLM** classifier (sidebar) — "
+                    "it reads any board style. To enable it on Streamlit Cloud, "
+                    "add `ANTHROPIC_API_KEY` in **Manage app → Settings → "
+                    "Secrets**, then **Reboot app**."
+                )
+
             with preview_col:
                 st.subheader("2. Detected board")
                 st.image(board_image_to_pil(det.board_image), caption="Warped board")
@@ -176,13 +214,15 @@ if st.session_state.current_fen is None:
                 if not det.found_board:
                     st.warning("No board rectangle found; used a centered crop.")
 
+    elif manual_fen.strip():
+        # Pasted FEN replaces whatever's in the box.
+        if st.session_state.fen_input_setup != manual_fen.strip():
+            st.session_state.fen_input_setup = manual_fen.strip()
+
     st.subheader("3. Review FEN")
-    initial_fen = (
-        manual_fen.strip()
-        or st.session_state.pending_detected_fen
-        or "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    )
-    fen_value = st.text_input("FEN", value=initial_fen, key="fen_input_setup")
+    if detection_warning:
+        st.warning(detection_warning)
+    fen_value = st.text_input("FEN", key="fen_input_setup")
 
     fen_valid = True
     try:

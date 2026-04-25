@@ -40,17 +40,46 @@ DEFAULT_BINARIES: dict[EngineName, str] = {
     "lc0": os.environ.get("LC0_PATH", "lc0"),
 }
 
+# Fallback locations checked when `shutil.which` doesn't find the binary on
+# PATH. /usr/games/* is where Debian's apt packages land for stockfish/lc0,
+# and that directory isn't always on PATH for non-login subprocesses (e.g.
+# Streamlit Community Cloud). The other paths cover Homebrew and common
+# Linux install prefixes.
+_FALLBACK_PATHS: dict[EngineName, tuple[str, ...]] = {
+    "stockfish": (
+        "/usr/games/stockfish",
+        "/usr/bin/stockfish",
+        "/usr/local/bin/stockfish",
+        "/opt/homebrew/bin/stockfish",
+        "/snap/bin/stockfish",
+    ),
+    "lc0": (
+        "/usr/games/lc0",
+        "/usr/bin/lc0",
+        "/usr/local/bin/lc0",
+        "/opt/homebrew/bin/lc0",
+    ),
+}
+
 
 def _resolve_binary(engine: EngineName) -> str:
     path = DEFAULT_BINARIES[engine]
-    resolved = shutil.which(path) if not os.path.isabs(path) else path
-    if not resolved or not os.path.exists(resolved):
-        env_var = "STOCKFISH_PATH" if engine == "stockfish" else "LC0_PATH"
-        raise EngineUnavailable(
-            f"{engine} binary not found. Install it and ensure it is on PATH, "
-            f"or set {env_var} to its absolute path."
-        )
-    return resolved
+    if os.path.isabs(path):
+        if os.path.exists(path):
+            return path
+    else:
+        which = shutil.which(path)
+        if which:
+            return which
+        for candidate in _FALLBACK_PATHS[engine]:
+            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+    env_var = "STOCKFISH_PATH" if engine == "stockfish" else "LC0_PATH"
+    raise EngineUnavailable(
+        f"{engine} binary not found on PATH or in common install locations. "
+        f"Install it (apt-get install {engine}) or set {env_var} to its "
+        "absolute path."
+    )
 
 
 def analyze_fen(
