@@ -67,6 +67,32 @@ def _neural_available() -> bool:
 neural_available = _neural_available()
 
 
+# Status banner: shows which classifiers are actually loaded so it's
+# obvious at a glance whether the cloud build picked up the neural extras.
+def _status_chip(label: str, ok: bool) -> str:
+    icon = "✅" if ok else "❌"
+    return f"{icon} **{label}**"
+
+
+st.markdown(
+    " · ".join(
+        [
+            _status_chip("Neural CNN", neural_available),
+            _status_chip("Claude VLM", vlm_configured),
+            _status_chip("Stockfish", engines_available.get("stockfish", False)),
+            _status_chip("Lc0", engines_available.get("lc0", False)),
+        ]
+    )
+)
+if not neural_available and not vlm_configured:
+    st.warning(
+        "Neither the offline neural classifier nor the Claude VLM is loaded — "
+        "detection will fall back to template matching, which is unreliable on "
+        "real chess UIs. **Manage app → Reboot app** to pull the latest "
+        "requirements (or Settings → Secrets to add `ANTHROPIC_API_KEY`)."
+    )
+
+
 # ---- Session state ---------------------------------------------------------
 def _init_state() -> None:
     st.session_state.setdefault("current_fen", None)
@@ -187,58 +213,60 @@ if st.session_state.current_fen is None:
     detection_warning: str | None = None
 
     if uploaded is not None and not manual_fen.strip():
+        image_bytes = uploaded.getvalue()
         try:
-            det = detect_board_fen(
-                uploaded.getvalue(),
-                orientation=orientation,
-                side_to_move=side_to_move,
-                template_set=template_set_choice,
+            # Route through the classifier picker (neural / vlm / templates)
+            # rather than templates-only.
+            from chess_analyzer.analyzer import _detect_fen as _route_detect
+
+            detected_fen, board_found, classifier_used = _route_detect(
+                AnalyzeRequest(
+                    image_bytes=image_bytes,
+                    classifier=classifier_choice,  # type: ignore[arg-type]
+                    orientation=orientation,
+                    side_to_move=side_to_move,
+                    template_set=template_set_choice,
+                )
             )
+            # Always also produce a warped preview from the OpenCV pipeline
+            # so the user can see what the classifier looked at, regardless
+            # of which classifier ran.
+            from chess_analyzer.vision import _decode_image, _find_and_warp_board
+
+            warped, _ = _find_and_warp_board(_decode_image(image_bytes))
         except Exception as exc:  # noqa: BLE001 - surfaced to user
             st.error(f"Could not process image: {exc}")
         else:
             new_upload = st.session_state.last_upload_id != uploaded.file_id
             if new_upload:
-                st.session_state.fen_input_setup = det.fen
+                st.session_state.fen_input_setup = detected_fen
                 st.session_state.last_upload_id = uploaded.file_id
-            st.session_state.pending_detected_fen = det.fen
+            st.session_state.pending_detected_fen = detected_fen
 
-            try:
-                piece_count = sum(
-                    1 for c in det.fen.split(" ")[0] if c.isalpha()
-                )
-            except Exception:  # noqa: BLE001
-                piece_count = 0
-            classifier_used = (
-                f"templates:{det.template_set_used}"
-                if det.template_set_used
-                else "unicode-glyph templates"
-            )
+            piece_count = sum(1 for c in detected_fen.split(" ")[0] if c.isalpha())
             if piece_count < 8:
                 fix_hint = ""
                 if not neural_available and not vlm_configured:
                     fix_hint = (
-                        " For reliable detection, install the offline neural "
-                        "classifier (`pip install -r requirements-neural.txt`) "
-                        "or set `ANTHROPIC_API_KEY` for the VLM path."
+                        " Reboot the app from **Manage app → Reboot** so the "
+                        "build picks up the neural extras, or set "
+                        "`ANTHROPIC_API_KEY` for the VLM path."
                     )
                 elif not neural_available:
                     fix_hint = (
-                        " The offline neural classifier (`pip install -r "
-                        "requirements-neural.txt`) is more accurate than "
-                        "templates on real screenshots."
+                        " The offline neural classifier isn't loaded — "
+                        "reboot the app to pick up the latest requirements."
                     )
                 detection_warning = (
-                    f"Only {piece_count} pieces recognised by **{classifier_used}**. "
+                    f"Only {piece_count} pieces recognised via **{classifier_used}**. "
                     "Edit the FEN below by hand to correct it." + fix_hint
                 )
 
             with preview_col:
                 st.subheader("2. Detected board")
-                st.image(board_image_to_pil(det.board_image), caption="Warped board")
-                if det.template_set_used:
-                    st.caption(f"Matched template set: **{det.template_set_used}**")
-                if not det.found_board:
+                st.image(board_image_to_pil(warped), caption="Warped board")
+                st.caption(f"Classifier used: **{classifier_used}**")
+                if not board_found:
                     st.warning("No board rectangle found; used a centered crop.")
 
     elif manual_fen.strip():
