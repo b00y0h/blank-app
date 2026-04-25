@@ -55,6 +55,18 @@ template_sets = sorted(_png_template_sets().keys())
 vlm_configured = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def _neural_available() -> bool:
+    try:
+        from chess_analyzer.vision_neural import is_available
+
+        return is_available()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+neural_available = _neural_available()
+
+
 # ---- Session state ---------------------------------------------------------
 def _init_state() -> None:
     st.session_state.setdefault("current_fen", None)
@@ -94,10 +106,13 @@ with st.sidebar:
         index=0,
     )
 
-    classifier_opts = ["auto", "vlm", "templates"]
+    classifier_opts = ["auto", "neural", "vlm", "templates"]
     classifier_labels = {
-        "auto": "Auto (VLM if available, else templates)",
-        "vlm": "Claude VLM only" + ("" if vlm_configured else " (ANTHROPIC_API_KEY missing)"),
+        "auto": "Auto (neural → VLM → templates)",
+        "neural": "Offline CNN (board_to_fen)"
+        + ("" if neural_available else " (not installed)"),
+        "vlm": "Claude VLM"
+        + ("" if vlm_configured else " (ANTHROPIC_API_KEY missing)"),
         "templates": "Templates only",
     }
     classifier_choice = st.radio(
@@ -105,6 +120,10 @@ with st.sidebar:
         classifier_opts,
         format_func=lambda c: classifier_labels[c],
         index=0,
+        help=(
+            "Auto picks the offline CNN first (highest accuracy on screenshots), "
+            "falls back to Claude VLM if an API key is configured, then templates."
+        ),
     )
 
     template_set_choice: str | None = None
@@ -196,14 +215,22 @@ if st.session_state.current_fen is None:
                 else "unicode-glyph templates"
             )
             if piece_count < 8:
+                fix_hint = ""
+                if not neural_available and not vlm_configured:
+                    fix_hint = (
+                        " For reliable detection, install the offline neural "
+                        "classifier (`pip install -r requirements-neural.txt`) "
+                        "or set `ANTHROPIC_API_KEY` for the VLM path."
+                    )
+                elif not neural_available:
+                    fix_hint = (
+                        " The offline neural classifier (`pip install -r "
+                        "requirements-neural.txt`) is more accurate than "
+                        "templates on real screenshots."
+                    )
                 detection_warning = (
                     f"Only {piece_count} pieces recognised by **{classifier_used}**. "
-                    "This usually means the piece set in your screenshot doesn't "
-                    "match the bundled templates. Either edit the FEN below by "
-                    "hand, or enable the **Claude VLM** classifier (sidebar) — "
-                    "it reads any board style. To enable it on Streamlit Cloud, "
-                    "add `ANTHROPIC_API_KEY` in **Manage app → Settings → "
-                    "Secrets**, then **Reboot app**."
+                    "Edit the FEN below by hand to correct it." + fix_hint
                 )
 
             with preview_col:

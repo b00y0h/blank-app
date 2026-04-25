@@ -64,6 +64,7 @@ enum EngineChoice: String, CaseIterable, Identifiable {
 
 enum ClassifierChoice: String, CaseIterable, Identifiable {
     case auto
+    case neural
     case vlm
     case templates
 
@@ -71,7 +72,8 @@ enum ClassifierChoice: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .auto:      return "Auto"
-        case .vlm:       return "Claude VLM"
+        case .neural:    return "Neural"
+        case .vlm:       return "VLM"
         case .templates: return "Templates"
         }
     }

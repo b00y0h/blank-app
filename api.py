@@ -47,11 +47,19 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, object]:
+    try:
+        from chess_analyzer.vision_neural import is_available as _neural_avail
+
+        neural_ok = _neural_avail()
+    except Exception:  # noqa: BLE001
+        neural_ok = False
+
     return {
         "status": "ok",
         "engines": available_engines(),
         "template_sets": sorted(_png_template_sets().keys()),
         "vlm_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "neural_available": neural_ok,
     }
 
 
@@ -65,7 +73,7 @@ async def analyze(
     time_limit_s: float = Form(1.0),
     depth: int | None = Form(None),
     multipv: int = Form(1),
-    classifier: Literal["auto", "templates", "vlm"] = Form("auto"),
+    classifier: Literal["auto", "templates", "vlm", "neural"] = Form("auto"),
     template_set: str | None = Form(None),
 ) -> dict[str, object]:
     if image is None and not fen:

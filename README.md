@@ -10,25 +10,40 @@ Three surfaces share one Python backend:
 - **HTTP API** — `api.py` (FastAPI, used by the iOS app and any client).
 - **iOS app** — SwiftUI sources under `ios/ChessMoveAnalyzer/`.
 
-## Vision: three classifier modes
+## Vision: four classifier modes
 
 Board recognition across every site/theme/camera is an open problem. This
 project picks its battles:
 
 | Mode          | How it works                                                   | When to use |
 | ------------- | -------------------------------------------------------------- | ----------- |
-| **`vlm`**     | Claude reads the board image and returns a FEN directly.        | Maximum robustness; any site, any theme, phone photos. Needs `ANTHROPIC_API_KEY` + network. |
-| **`templates`** | PNG piece sets under `chess_analyzer/templates/<name>/` are matched per-cell. Falls back to Unicode-glyph shape templates if no PNGs are present. | Offline, fast, cheap. Most reliable when you add a template set per site you use. |
-| **`auto`**    | Try VLM first, fall back to templates on failure.               | Default. |
+| **`neural`**  | [`board_to_fen`](https://github.com/mcdominik/board_to_fen) — a small Keras CNN trained on Lichess-style 2D boards classifies each square. Bundled weights, runs **fully offline**. | Default whenever you want offline, multi-site detection. Requires the optional install (see below). |
+| **`vlm`**     | Claude reads the board image and returns a FEN directly.        | Photos of physical boards, exotic 3D themes, anywhere the CNN struggles. Needs `ANTHROPIC_API_KEY` + network. |
+| **`templates`** | PNG piece sets under `chess_analyzer/templates/<name>/` are matched per-cell. Falls back to Unicode-glyph shape templates if no PNGs are present. | Lightweight fallback when neither neural nor VLM is configured. |
+| **`auto`**    | Try neural → VLM → templates, falling through on failure.       | Default. |
 
-Bundling a site's piece set (e.g. chess.com) is 12 PNGs — see
-[`chess_analyzer/templates/README.md`](chess_analyzer/templates/README.md).
-The loader auto-picks whichever set best matches the screenshot, so you can
-keep multiple sets around (chess.com, lichess, your own 3D set) without
-configuration.
+Whichever classifier wins, both UIs surface the detected FEN as an editable
+field before the game starts.
 
-Regardless of mode, both UIs surface the detected FEN as an editable field
-before the game starts.
+### Install the offline neural classifier
+
+The neural path is an optional extra because it pulls in TensorFlow
+(~500 MB on disk):
+
+```bash
+pip install -r requirements-neural.txt
+```
+
+That installs `board_to_fen` plus the matching `tensorflow==2.15.*` and
+`keras==2.15.*` versions (board_to_fen's bundled SavedModel needs Keras 2;
+later versions can't load it). After install, the **neural** classifier
+becomes available and is auto-selected first; nothing else changes.
+
+For Streamlit Community Cloud the neural extras can exceed the free-tier
+limits, so the cloud deploy stays on the smaller default dependency set
+(`requirements.txt`). For a personal device or your own VM, the neural
+extras give you offline, no-network, CNN-grade accuracy on chess.com,
+Lichess, and most 2D boards.
 
 ## Setup
 
@@ -41,11 +56,17 @@ Engine binaries (install whichever you'll use):
 - **Stockfish** — `brew install stockfish` (macOS) · `apt-get install stockfish` (Debian/Ubuntu) · or set `STOCKFISH_PATH=/abs/path/to/stockfish`.
 - **Leela Chess Zero** — See <https://lczero.org/play/download/>. Lc0 also needs a weights file; point to it via Lc0's own config or `LC0_PATH`.
 
-Optional for VLM classifier:
+Optional add-ons:
 
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+- **Offline neural classifier** (recommended for accuracy on real screenshots):
+  ```bash
+  pip install -r requirements-neural.txt
+  ```
+  Adds `board_to_fen` + matched TensorFlow / Keras (~500 MB).
+- **Claude VLM classifier** (handles photos / exotic boards over the network):
+  ```bash
+  export ANTHROPIC_API_KEY=sk-ant-...
+  ```
 
 ## Run the web app
 

@@ -15,7 +15,7 @@ import chess
 from .engines import EngineName, EngineResult, analyze_fen
 from .vision import BoardDetectionResult, detect_board_fen
 
-ClassifierName = Literal["auto", "templates", "vlm"]
+ClassifierName = Literal["auto", "templates", "vlm", "neural"]
 
 
 @dataclass
@@ -127,12 +127,38 @@ def _compute_next_fen(fen: str, best_move_uci: str) -> str:
 
 
 def _detect_fen(req: AnalyzeRequest) -> tuple[str, bool, str]:
-    """Run the configured classifier(s) and return (fen, board_found, label)."""
+    """Run the configured classifier(s) and return (fen, board_found, label).
+
+    In auto mode the priority is: offline neural CNN (best accuracy and no
+    network), then VLM (works on anything but needs an API key), then
+    template matching (always available, lower accuracy on unfamiliar
+    sets). Each path falls through gracefully when its dependency is
+    missing or it fails.
+    """
     assert req.image_bytes is not None
+
+    if req.classifier in ("neural", "auto"):
+        try:
+            from .vision_neural import NeuralUnavailable, detect_fen_via_cnn
+
+            try:
+                fen, found = detect_fen_via_cnn(
+                    req.image_bytes,
+                    orientation=req.orientation,
+                    side_to_move=req.side_to_move,
+                )
+                return fen, found, "neural"
+            except NeuralUnavailable:
+                if req.classifier == "neural":
+                    raise
+        except ImportError:
+            if req.classifier == "neural":
+                raise
 
     if req.classifier in ("vlm", "auto"):
         try:
-            from .vision_vlm import detect_fen_via_claude, VLMUnavailable
+            from .vision_vlm import VLMUnavailable, detect_fen_via_claude
+
             try:
                 fen = detect_fen_via_claude(
                     req.image_bytes,
@@ -143,7 +169,6 @@ def _detect_fen(req: AnalyzeRequest) -> tuple[str, bool, str]:
             except VLMUnavailable:
                 if req.classifier == "vlm":
                     raise
-                # "auto" falls through to templates
         except ImportError:
             if req.classifier == "vlm":
                 raise
