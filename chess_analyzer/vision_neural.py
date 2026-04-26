@@ -22,12 +22,21 @@ Pipeline:
 from __future__ import annotations
 
 import os
+import sys
 
-# board_to_fen loads a TensorFlow SavedModel produced under Keras 2. With
-# the standalone keras 3 package installed alongside TF, model loading
-# fails. Setting TF_USE_LEGACY_KERAS=1 before any keras-using imports
-# routes `import keras` through tf-keras (the Keras 2 backport).
+# board_to_fen ships a Keras-2 SavedModel. With TensorFlow >= 2.16 the
+# default Keras package is v3, which can't load that legacy artifact. We
+# monkey-patch `sys.modules["keras"]` to the Keras-2 backport (`tf_keras`)
+# before board_to_fen does its `from keras import models, layers`, so the
+# legacy model loads regardless of which TF is installed. Also flip the
+# documented env switch for code paths that go through `tf.keras` directly.
 os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
+try:
+    import tf_keras as _tf_keras  # type: ignore[import-not-found]
+
+    sys.modules.setdefault("keras", _tf_keras)
+except ImportError:
+    pass
 
 import chess
 import cv2

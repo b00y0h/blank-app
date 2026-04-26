@@ -1,5 +1,5 @@
-# The neural classifier is now part of the base install — see
-# requirements.txt. This file is kept for backwards compatibility so
-# existing `pip install -r requirements-neural.txt` invocations still work,
-# but it just re-exports the base requirements.
+# The neural classifier (board_to_fen + tensorflow-cpu + tf-keras) is now
+# part of the base install — see requirements.txt. This file remains so any
+# existing `pip install -r requirements-neural.txt` invocations keep
+# working; it just re-exports the base requirements.
 -r requirements.txt

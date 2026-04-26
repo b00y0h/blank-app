@@ -7,16 +7,17 @@ python-chess>=1.999
 Pillow>=10.2
 anthropic>=0.40
 pydantic>=2.6
+numpy>=1.26
+opencv-python-headless>=4.9
 
-# Vision deps. Pin numpy<2 and opencv<4.12 so they coexist with TF 2.15 below.
-numpy>=1.26,<2.0
-opencv-python-headless>=4.9,<4.12
-
-# Offline neural classifier (board_to_fen). tensorflow-cpu instead of
-# tensorflow keeps the install small enough for Streamlit Community Cloud
-# (~150 MB vs ~600 MB) without losing inference quality — there's no GPU on
-# Streamlit Cloud anyway. board_to_fen ships a Keras 2 SavedModel, so keras
-# is pinned to a matching 2.x release.
+# Offline neural classifier (board_to_fen + TensorFlow CPU).
+# - tensorflow-cpu (no GPU bits, ~150 MB) keeps install size manageable on
+#   Streamlit Community Cloud and other resource-constrained hosts.
+# - tf-keras is the Keras 2 backport. board_to_fen ships a Keras 2
+#   SavedModel that Keras 3 cannot load; vision_neural.py monkey-patches
+#   `sys.modules["keras"]` to tf_keras before board_to_fen imports, so
+#   we can use the latest TF (which only ships Keras 3 by default) while
+#   still loading the legacy model.
 board_to_fen>=0.1.1
-tensorflow-cpu==2.15.*
-keras==2.15.*
+tensorflow-cpu>=2.18
+tf-keras>=2.18
